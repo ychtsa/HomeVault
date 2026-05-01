@@ -1,0 +1,110 @@
+﻿@*
+* FILE: _Layout.cshtml
+* PROJECT: HomeVault
+* FIRST VERSION: 2026-04-07
+* DESCRIPTION: Master layout. Provides the branded navbar, container, and
+*              footer for every page.
+*@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] | HomeVault</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body class="d-flex flex-column min-vh-100 bg-body-tertiary">
+    <header>
+        <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm mb-4">
+            <div class="container">
+                <a class="navbar-brand d-flex align-items-center gap-2 fw-semibold"
+                   asp-controller="Home" asp-action="Index">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"
+                         viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 11.5 12 4l9 7.5" />
+                        <path d="M5 10v10h14V10" />
+                        <circle cx="12" cy="14" r="2" />
+                        <path d="M12 16v2" />
+                    </svg>
+                    HomeVault
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#navMain" aria-controls="navMain"
+                        aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <div class="collapse navbar-collapse" id="navMain">
+                    <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                        @if (User.Identity?.IsAuthenticated == true)
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link" asp-controller="Items" asp-action="Index">
+                                    My Catalog
+                                </a>
+                            </li>
+                        }
+                        <li class="nav-item">
+                            <a class="nav-link" asp-controller="Home" asp-action="Privacy">
+                                Privacy
+                            </a>
+                        </li>
+                    </ul>
+
+                    <ul class="navbar-nav ms-auto d-flex align-items-center gap-2">
+                        @if (User.Identity?.IsAuthenticated == true)
+                        {
+                            <li class="nav-item d-flex align-items-center small text-muted">
+                                Signed in as <strong class="ms-1">@User.Identity!.Name</strong>
+                            </li>
+                            <li class="nav-item">
+                                <form asp-controller="Account" asp-action="Logout"
+                                      method="post" class="d-inline">
+                                    @Html.AntiForgeryToken()
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                        Log out
+                                    </button>
+                                </form>
+                            </li>
+                        }
+                        else
+                        {
+                            <li class="nav-item">
+                                <a class="btn btn-sm btn-outline-secondary"
+                                   asp-controller="Account" asp-action="Login">
+                                    Log in
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="btn btn-sm btn-primary"
+                                   asp-controller="Account" asp-action="Signup">
+                                    Sign up
+                                </a>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main role="main" class="container flex-grow-1 pb-4">
+        @RenderBody()
+    </main>
+
+    <footer class="border-top text-muted py-3 mt-auto bg-white">
+        <div class="container small d-flex justify-content-between">
+            <span>&copy; @DateTime.Now.Year HomeVault</span>
+            <a asp-controller="Home" asp-action="Privacy" class="text-muted">Privacy</a>
+        </div>
+    </footer>
+
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

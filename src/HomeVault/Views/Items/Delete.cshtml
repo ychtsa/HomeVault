@@ -1,0 +1,40 @@
+@*
+* FILE: Delete.cshtml
+* PROJECT: HomeVault
+* FIRST VERSION: 2026-04-07
+* DESCRIPTION: Confirmation page before deleting a catalog item.
+*@
+
+@model CatalogItem
+@{
+    ViewData["Title"] = "Delete Item";
+}
+
+<div class="row">
+    <div class="col-md-6">
+        <h1 class="mb-1">Delete Item</h1>
+        <p class="text-muted mb-4">This action cannot be undone.</p>
+
+        <div class="card border-danger mb-4">
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Name</dt>
+                    <dd class="col-sm-8">@Model.ItemName</dd>
+
+                    <dt class="col-sm-4">Type</dt>
+                    <dd class="col-sm-8">@Model.ItemType</dd>
+
+                    <dt class="col-sm-4">Value</dt>
+                    <dd class="col-sm-8">@Model.GetFormattedValue()</dd>
+                </dl>
+            </div>
+        </div>
+
+        <form asp-action="Delete" method="post">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="Itemid" value="@Model.ItemId" />
+            <button type="submit" class="btn btn-danger">Yes, Delete</button>
+            <a asp-action="Index" class="btn btn-link">Cancel</a>
+        </form>
+    </div>
+</div>

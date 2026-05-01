@@ -1,0 +1,77 @@
+@*
+* FILE: Index.cshtml
+* PROJECT: HomeVault
+* FIRST VERSION: 2026-04-07
+* DESCRIPTION: Catalog list — shows every item that belongs to the
+*              currently signed-in resident's CatalogId.
+*@
+
+@model IEnumerable<CatalogItem>
+@{
+    ViewData["Title"] = "My Catalog";
+}
+
+@if (TempData["SuccessMessage"] is string msg)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        @msg
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="mb-1">My Catalog</h1>
+        @{ int itemCount = Model.Count(); }
+        <p class="text-muted mb-0 small">
+            @itemCount item@(itemCount == 1 ? "" : "s") cataloged.
+        </p>
+    </div>
+    <a asp-action="Create" class="btn btn-primary">+ Add Item</a>
+</div>
+
+@if (!Model.Any())
+{
+    <div class="text-center py-5 border rounded bg-light">
+        <p class="text-muted mb-3">Your catalog is empty.</p>
+        <a asp-action="Create" class="btn btn-outline-primary">Add your first item</a>
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Item</th>
+                    <th>Type</th>
+                    <th class="text-end">Value</th>
+                    <th class="text-end" style="width: 180px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (CatalogItem item in Model)
+                {
+                    <tr>
+                        <td>@item.ItemName</td>
+                        <td><span class="badge bg-secondary">@item.ItemType</span></td>
+                        <td class="text-end fw-semibold">@item.GetFormattedValue()</td>
+                        <td class="text-end">
+                            <a asp-action="Edit" asp-route-id="@item.ItemId"
+                               class="btn btn-sm btn-outline-secondary">Edit</a>
+                            <a asp-action="Delete" asp-route-id="@item.ItemId"
+                               class="btn btn-sm btn-outline-danger">Delete</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr class="table-light">
+                    <td colspan="2" class="text-end fw-semibold">Total Estimated Value</td>
+                    <td class="text-end fw-bold">$@Model.Sum(i => i.ItemValue).ToString("N2")</td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+}

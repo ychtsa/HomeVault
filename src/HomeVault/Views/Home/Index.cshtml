@@ -1,0 +1,58 @@
+﻿@*
+* FILE: Index.cshtml
+* PROJECT: HomeVault
+* FIRST VERSION: 2026-04-07
+* DESCRIPTION: Home page. Hero, three feature cards, and CTA for the
+*              signed-in resident.
+*@
+
+@{
+    ViewData["Title"] = "HomeVault — Secure your home, item by item";
+}
+
+<section class="py-5 text-center border-bottom mb-5">
+    <h1 class="display-4 fw-bold">Secure your home, item by item.</h1>
+    <p class="lead text-muted col-md-8 mx-auto mb-4">
+        HomeVault is a personal insurance catalog. Track every item that
+        matters, know what it's worth, and have the records ready before
+        you ever need them.
+    </p>
+    <a asp-controller="Items" asp-action="Index" class="btn btn-primary btn-lg px-4">
+        Open My Catalog
+    </a>
+</section>
+
+<section class="row text-center g-4 pb-5">
+    <div class="col-md-4">
+        <div class="p-4 h-100 border rounded">
+            <div class="display-6 mb-2">📋</div>
+            <h5>Catalog Anything</h5>
+            <p class="text-muted small mb-0">
+                Add electronics, jewelry, furniture, or anything else.
+                Track name, category, and estimated value at a glance.
+            </p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="p-4 h-100 border rounded">
+            <div class="display-6 mb-2">🔐</div>
+            <h5>Private by Design</h5>
+            <p class="text-muted small mb-0">
+                Your catalog is scoped to your account. Passwords are
+                BCrypt-hashed and per-user data isolation is enforced
+                in every database query.
+            </p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="p-4 h-100 border rounded">
+            <div class="display-6 mb-2">⚡</div>
+            <h5>Ready When You Need It</h5>
+            <p class="text-muted small mb-0">
+                Lose something to fire, theft, or damage and your
+                inventory is one login away — with totals tallied for
+                your insurer.
+            </p>
+        </div>
+    </div>
+</section>

@@ -1,0 +1,57 @@
+@*
+* FILE: Login.cshtml
+* PROJECT: HomeVault
+* FIRST VERSION: 2026-04-07
+* DESCRIPTION: Login form. Posts credentials to AccountController.Login.
+*@
+
+@model LoginViewModel
+@{
+    ViewData["Title"] = "Log in";
+}
+
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h2 class="card-title mb-1">Welcome back</h2>
+                <p class="text-muted small mb-4">Sign in to manage your home inventory.</p>
+
+                @if (TempData["SuccessMessage"] is string msg)
+                {
+                    <div class="alert alert-success py-2 small">@msg</div>
+                }
+
+                <form asp-action="Login" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" asp-for="ReturnUrl" />
+
+                    <div asp-validation-summary="ModelOnly" class="text-danger small mb-3"></div>
+
+                    <div class="mb-3">
+                        <label asp-for="Username" class="form-label"></label>
+                        <input asp-for="Username" class="form-control" autocomplete="username" />
+                        <span asp-validation-for="Username" class="text-danger small"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Password" class="form-label"></label>
+                        <input asp-for="Password" class="form-control" autocomplete="current-password" />
+                        <span asp-validation-for="Password" class="text-danger small"></span>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">Log in</button>
+                </form>
+
+                <p class="text-center mt-3 mb-0 small">
+                    Don't have an account?
+                    <a asp-action="Signup">Create one</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

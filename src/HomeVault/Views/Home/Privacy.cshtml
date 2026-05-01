@@ -1,0 +1,40 @@
+﻿@*
+* FILE: Privacy.cshtml
+* PROJECT: HomeVault
+* FIRST VERSION: 2026-04-07
+* DESCRIPTION: Privacy policy outlining data handling and security choices.
+*@
+
+@{
+    ViewData["Title"] = "Privacy";
+}
+
+<h1 class="mb-1">Privacy</h1>
+<p class="text-muted mb-4">How HomeVault handles your data.</p>
+
+<h4 class="mt-4">What we store</h4>
+<p class="small">
+    Only what you provide: a username, a password, your name and address,
+    and the items you choose to catalog. Nothing else is collected.
+</p>
+
+<h4 class="mt-4">How passwords are handled</h4>
+<p class="small">
+    Passwords are hashed with BCrypt before they are written to the
+    database. Plaintext passwords are never persisted and cannot be
+    recovered — only verified at login time.
+</p>
+
+<h4 class="mt-4">Data isolation</h4>
+<p class="small">
+    Every catalog operation is scoped to the CatalogId stored in your
+    auth cookie. The database queries themselves filter by that id, so a
+    user cannot see or modify another user's items even with a crafted
+    request.
+</p>
+
+<h4 class="mt-4">Third parties</h4>
+<p class="small">
+    HomeVault uses no third-party analytics, advertising, or tracking.
+    No data leaves the application's own database.
+</p>

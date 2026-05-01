@@ -1,0 +1,35 @@
+# FILE: ci.yml
+# PROJECT: HomeVault
+# DESCRIPTION: GitHub Actions workflow that builds the solution and runs
+#              the test suite on every push and pull request to main.
+#              Provides the green CI badge on the repo's README.
+
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore HomeVault.slnx
+
+      - name: Build solution
+        run: dotnet build HomeVault.slnx --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test HomeVault.slnx --configuration Release --no-build --verbosity normal
