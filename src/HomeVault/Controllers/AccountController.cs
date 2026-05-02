@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
@@ -67,6 +68,7 @@ namespace HomeVault.Controllers
          *         Login view repopulated with errors on failure.
          */
         [HttpPost, AllowAnonymous, ValidateAntiForgeryToken]
+        [EnableRateLimiting("login")]
         public async Task<IActionResult> Login(LoginViewModel model)
         {
             IActionResult result = View(model);
@@ -106,6 +108,10 @@ namespace HomeVault.Controllers
                 }
                 else
                 {
+                    _logger.LogWarning(
+                        "Failed login attempt for {Username} from {RemoteIp}",
+                        model.Username,
+                        HttpContext.Connection.RemoteIpAddress);
                     ModelState.AddModelError("", "Invalid username or password.");
                 }
             }

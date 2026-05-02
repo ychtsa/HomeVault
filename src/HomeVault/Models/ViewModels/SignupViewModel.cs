@@ -23,8 +23,10 @@ namespace HomeVault.Models.ViewModels
         [Required, StringLength(30, MinimumLength = 3)]
         public string Username { get; set; } = "";
 
-        [Required, StringLength(100, MinimumLength = 6,
-            ErrorMessage = "Password must be at least 6 characters.")]
+        [Required, StringLength(100, MinimumLength = 8,
+            ErrorMessage = "Password must be at least 8 characters.")]
+        [RegularExpression(@"^(?=.*[A-Za-z])(?=.*\d).+$",
+            ErrorMessage = "Password must contain at least one letter and one digit.")]
         [DataType(DataType.Password)]
         public string Password { get; set; } = "";
 

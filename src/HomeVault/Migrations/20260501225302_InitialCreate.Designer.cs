@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace HomeVault.Migrations
 {
     [DbContext(typeof(CatalogDbContext))]
-    [Migration("20260501024511_InitialCreate")]
+    [Migration("20260501225302_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />

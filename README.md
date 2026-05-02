@@ -10,12 +10,14 @@ HomeVault is a multi-tenant insurance catalog where each resident logs in to man
 
 ## Highlights
 
-- **Cookie-based authentication** with sliding 30-minute expiration and `HttpOnly` + `SameSite=Lax` cookies.
+- **Multi-layered authentication** — cookie auth with sliding 30-minute expiration, HTTPS-only `Secure` cookies, `HttpOnly`, `SameSite=Lax`.
 - **BCrypt password hashing** — plaintext passwords are never persisted and cannot be recovered.
-- **Per-user data isolation** enforced at the query level (not just at the controller). Validated by automated security tests.
+- **Per-user data isolation** enforced at the query level, not just at the controller. Validated by automated security tests.
+- **Brute-force protection** — login endpoint rate-limited to 5 attempts per IP per minute, with `Retry-After` hints.
+- **Hardened response headers** — strict CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy` on every response.
 - **CSRF protection** via `[ValidateAntiForgeryToken]` on every state-changing action.
-- **Login-first UX** — unauthenticated requests are redirected to `/Account/Login`; successful login routes back to the originally requested URL.
-- **EF Core migrations** for repeatable schema versioning, plus an idempotent demo-data seeder.
+- **Login-first UX** — unauthenticated requests redirect to `/Account/Login`; successful login routes back to the originally requested URL.
+- **EF Core migrations** for repeatable schema versioning.
 - **CI on every push** — GitHub Actions restores, builds, and runs the full test suite on .NET 8.
 
 ---
@@ -29,6 +31,7 @@ HomeVault is a multi-tenant insurance catalog where each resident logs in to man
 | Database | SQL Server (LocalDB or full SQL Server) |
 | Auth | Cookie authentication scheme |
 | Hashing | BCrypt.Net-Next 4.1.0 |
+| Rate limiting | `Microsoft.AspNetCore.RateLimiting` (built-in, .NET 8) |
 | Tests | xUnit + Moq + EF Core InMemory |
 | CI | GitHub Actions |
 | UI | Bootstrap 5 |
@@ -56,12 +59,36 @@ These tests run on every push to `main`.
 
 ---
 
+## Security defenses
+
+Beyond the data-isolation guarantee tested above, HomeVault layers in standard web-app hardening:
+
+| Defense | Where | What it does |
+|---|---|---|
+| **Brute-force login protection** | `Program.cs` rate limiter + `[EnableRateLimiting("login")]` | 5 attempts per IP per minute → `429 Too Many Requests` with `Retry-After: 60` |
+| **BCrypt password hashing** | `AccountController.Signup` / `Login` | Salted, slow hash; resistant to rainbow tables and parallel cracking |
+| **Strong password policy** | `SignupViewModel` | Minimum 8 characters, must contain at least one letter and one digit |
+| **Secure cookies** | `Program.cs` cookie auth options | `HttpOnly`, `SameSite=Lax`, `SecurePolicy=Always` (HTTPS-only) |
+| **CSRF protection** | `[ValidateAntiForgeryToken]` on every POST | Anti-forgery cookie also marked `Secure` |
+| **HTTPS enforcement** | `app.UseHttpsRedirection()` + HSTS in production | Forces TLS, removes mixed-content downgrade risk |
+| **Strict CSP** | `SecurityHeadersMiddleware` | `default-src 'self'`, no inline scripts, no framing — mitigates most XSS |
+| **Clickjacking protection** | `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` | Page cannot be embedded in any iframe |
+| **MIME-sniffing protection** | `X-Content-Type-Options: nosniff` | Browsers honor declared `Content-Type` |
+| **Referrer minimization** | `Referrer-Policy: strict-origin-when-cross-origin` | Cross-origin requests leak only the origin, not the full URL |
+| **Browser feature lockdown** | `Permissions-Policy` | Camera, microphone, geolocation explicitly disabled |
+| **Open-redirect prevention** | `LocalRedirect()` for post-login `returnUrl` | External URLs are rejected by the framework |
+| **Generic auth errors** | "Invalid username or password" | No username-enumeration via login responses |
+| **Failed-login logging** | `_logger.LogWarning(...)` in `AccountController.Login` | Structured warning per failure with username + remote IP, ready for SIEM ingestion |
+| **Parameterized queries** | All DB access via EF Core LINQ | No string-concatenated SQL anywhere — SQL injection impossible by construction |
+
+---
+
 ## Getting started
 
 ### Prerequisites
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- SQL Server (LocalDB on Windows works out of the box, or any SQL Server instance)
+- SQL Server — [LocalDB](https://learn.microsoft.com/en-us/sql/database-engine/configure-windows/sql-server-express-localdb) on Windows is the simplest option
 
 ### Setup
 
@@ -71,33 +98,21 @@ These tests run on every push to `main`.
    cd HomeVault
    ```
 
-2. Configure the connection string via [.NET user secrets](https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets) — never commit it to the repo:
+2. Configure the connection string via [.NET user secrets](https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets) — never commit it to source:
    ```bash
    cd src/HomeVault
    dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=HomeVault;Trusted_Connection=True;MultipleActiveResultSets=true"
    ```
 
-3. Apply migrations and run:
+3. Run the app:
    ```bash
    dotnet run
    ```
+   EF Core applies pending migrations automatically on startup.
 
-   The app applies pending migrations automatically and seeds two demo accounts on first startup.
+4. Open https://localhost:5001 (or whichever port is reported on launch), click **Sign up**, and create your own account.
 
-4. Open https://localhost:5001 (or whichever port is reported on launch).
-
----
-
-## Demo accounts
-
-Two accounts are seeded on first run for evaluation:
-
-| Username | Password | Items |
-|---|---|---|
-| `demo1` | `Demo123!` | Alice's catalog (4 items) |
-| `demo2` | `Demo123!` | Bob's catalog (3 items) |
-
-Sign in as `demo1` and try guessing one of Bob's item URLs (e.g. `/Items/Edit/i0005`) — you'll get a `404`, demonstrating the isolation guarantee.
+> The project intentionally ships with no pre-seeded users — the signup flow itself is part of the demo. Create an account, log in, add some items, and try the security guarantees by inspecting browser dev tools (response headers) or by trying to guess another user's item URL.
 
 ---
 
@@ -108,9 +123,12 @@ dotnet test HomeVault.slnx
 ```
 
 The test suite covers:
+
 - **`BCryptTests`** — round-trip hashing, wrong-password rejection, salt uniqueness.
 - **`SignupTests`** — duplicate-username rejection and atomic Catalog/Resident/User creation.
 - **`CatalogIsolationTests`** — the security-critical cross-tenant access tests described above.
+
+All tests run automatically in CI on every push and pull request to `main`.
 
 ---
 
@@ -120,7 +138,8 @@ The test suite covers:
 HomeVault/
 ├── src/HomeVault/                  ASP.NET Core MVC application
 │   ├── Controllers/                Account, Home, Items
-│   ├── Data/                       EF Core DbContext + seeder
+│   ├── Data/                       EF Core DbContext
+│   ├── Middleware/                 Custom middleware (security headers)
 │   ├── Models/
 │   │   ├── Entities/               Catalog, CatalogItem, Resident, ResidentUser
 │   │   └── ViewModels/             Login, Signup, CatalogItemForm
