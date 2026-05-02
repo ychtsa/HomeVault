@@ -126,10 +126,19 @@ try
     var app = builder.Build();
 
     // ----- Apply migrations on startup -----
+    // Real (relational) providers run migrations; in-memory providers used
+    // by tests do not support Migrate() and use EnsureCreated() instead.
     using (var scope = app.Services.CreateScope())
     {
         CatalogDbContext context = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
-        context.Database.Migrate();
+        if (context.Database.IsRelational())
+        {
+            context.Database.Migrate();
+        }
+        else
+        {
+            context.Database.EnsureCreated();
+        }
     }
 
     // ----- HTTP pipeline -----
