@@ -11,6 +11,7 @@
 
 using HomeVault.Data;
 using HomeVault.Middleware;
+using HomeVault.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -103,6 +104,11 @@ try
     // load balancers and uptime monitors to verify the app is fully alive.
     builder.Services.AddHealthChecks()
         .AddDbContextCheck<CatalogDbContext>("database");
+
+    // Email transport. LogEmailSender writes outgoing email to the app log
+    // — fine for development. Swap for an SMTP / SendGrid implementation
+    // in production.
+    builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 
     var app = builder.Build();
 

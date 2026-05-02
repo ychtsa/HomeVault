@@ -10,6 +10,7 @@ using HomeVault.Controllers;
 using HomeVault.Data;
 using HomeVault.Models.Entities;
 using HomeVault.Models.ViewModels;
+using HomeVault.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
@@ -50,6 +51,7 @@ namespace HomeVault.Tests
             {
                 ResidentId = "rA",
                 Username = "alice",
+                Email = "alice@example.com",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Demo123!")
             });
             context.SaveChanges();
@@ -67,7 +69,8 @@ namespace HomeVault.Tests
         private static AccountController BuildController(CatalogDbContext context)
         {
             ILogger<AccountController> logger = new Mock<ILogger<AccountController>>().Object;
-            AccountController controller = new AccountController(context, logger);
+            IEmailSender emailSender = new Mock<IEmailSender>().Object;
+            AccountController controller = new AccountController(context, emailSender, logger);
 
             // Minimum HttpContext so TempData / ModelState work.
             controller.ControllerContext = new ControllerContext
@@ -100,6 +103,7 @@ namespace HomeVault.Tests
                 ResidentName = "Alice 2",
                 ResidentAddress = "2 Side St",
                 Username = "alice",
+                Email = "alice2@example.com",
                 Password = "Demo123!",
                 ConfirmPassword = "Demo123!"
             };
@@ -135,6 +139,7 @@ namespace HomeVault.Tests
                 ResidentName = "Bob",
                 ResidentAddress = "3 Other St",
                 Username = "bob",
+                Email = "bob@example.com",
                 Password = "Demo456!",
                 ConfirmPassword = "Demo456!"
             };

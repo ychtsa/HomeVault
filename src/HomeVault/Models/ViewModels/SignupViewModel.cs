@@ -3,7 +3,8 @@
  * PROJECT: HomeVault
  * FIRST VERSION: 2026-04-13
  * DESCRIPTION: View model for the user registration form, with built-in
- *              validation rules (length, password match).
+ *              validation rules (length, email format, password strength,
+ *              password match).
  */
 
 using System.ComponentModel.DataAnnotations;
@@ -22,6 +23,9 @@ namespace HomeVault.Models.ViewModels
 
         [Required, StringLength(30, MinimumLength = 3)]
         public string Username { get; set; } = "";
+
+        [Required, StringLength(100), EmailAddress]
+        public string Email { get; set; } = "";
 
         [Required, StringLength(100, MinimumLength = 8,
             ErrorMessage = "Password must be at least 8 characters.")]

@@ -65,6 +65,11 @@ namespace HomeVault.Data
                 .HasIndex(u => u.Username)
                 .IsUnique();
 
+            // Email must be unique across all users (enables password reset by email).
+            modelBuilder.Entity<ResidentUser>()
+                .HasIndex(u => u.Email)
+                .IsUnique();
+
             base.OnModelCreating(modelBuilder);
         }
     }
