@@ -487,3 +487,6 @@ $RECYCLE.BIN/
 *.pfx
 *.key
 
+# Application logs (Serilog rolling-file sink)
+logs/
+
