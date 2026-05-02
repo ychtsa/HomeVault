@@ -43,6 +43,7 @@ else
         <table class="table table-hover align-middle">
             <thead class="table-light">
                 <tr>
+                    <th style="width: 70px;"></th>
                     <th>Item</th>
                     <th>Type</th>
                     <th class="text-end">Value</th>
@@ -53,6 +54,20 @@ else
                 @foreach (CatalogItem item in Model)
                 {
                     <tr>
+                        <td>
+                            @if (!string.IsNullOrEmpty(item.ImageContentType))
+                            {
+                                <img src="@Url.Action("Image", new { id = item.ItemId })"
+                                     alt="@item.ItemName"
+                                     class="rounded border"
+                                     style="width: 56px; height: 56px; object-fit: cover;" />
+                            }
+                            else
+                            {
+                                <div class="rounded border bg-light d-flex align-items-center justify-content-center text-muted small"
+                                     style="width: 56px; height: 56px;">—</div>
+                            }
+                        </td>
                         <td>@item.ItemName</td>
                         <td><span class="badge bg-secondary">@item.ItemType</span></td>
                         <td class="text-end fw-semibold">@item.GetFormattedValue()</td>
@@ -67,7 +82,7 @@ else
             </tbody>
             <tfoot>
                 <tr class="table-light">
-                    <td colspan="2" class="text-end fw-semibold">Total Estimated Value</td>
+                    <td colspan="3" class="text-end fw-semibold">Total Estimated Value</td>
                     <td class="text-end fw-bold">$@Model.Sum(i => i.ItemValue).ToString("N2")</td>
                     <td></td>
                 </tr>

@@ -490,3 +490,6 @@ $RECYCLE.BIN/
 # Application logs (Serilog rolling-file sink)
 logs/
 
+# User-uploaded item images — never committed
+src/HomeVault/App_Data/
+

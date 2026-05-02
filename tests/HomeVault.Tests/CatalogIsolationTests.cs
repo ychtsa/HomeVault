@@ -12,9 +12,11 @@ using System.Security.Claims;
 using HomeVault.Controllers;
 using HomeVault.Data;
 using HomeVault.Models.Entities;
+using HomeVault.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Moq;
 using Xunit;
 
 namespace HomeVault.Tests
@@ -67,7 +69,8 @@ namespace HomeVault.Tests
         private static ItemsController BuildControllerForCatalog(
             CatalogDbContext context, string catalogId)
         {
-            ItemsController controller = new ItemsController(context);
+            ICatalogImageStorage storage = new Mock<ICatalogImageStorage>().Object;
+            ItemsController controller = new ItemsController(context, storage);
 
             List<Claim> claims = new List<Claim>
             {

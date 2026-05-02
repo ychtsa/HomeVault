@@ -110,6 +110,11 @@ try
     // in production.
     builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 
+    // Per-catalog image storage. Backed by the local filesystem under
+    // App_Data/uploads/. Production deployments could substitute Azure Blob
+    // Storage, S3, etc., behind the same interface.
+    builder.Services.AddSingleton<ICatalogImageStorage, FilesystemCatalogImageStorage>();
+
     var app = builder.Build();
 
     // ----- Apply migrations on startup -----
