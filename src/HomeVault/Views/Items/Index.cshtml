@@ -27,7 +27,15 @@
             @itemCount item@(itemCount == 1 ? "" : "s") cataloged.
         </p>
     </div>
-    <a asp-action="Create" class="btn btn-primary">+ Add Item</a>
+    <div class="d-flex gap-2">
+        @if (Model.Any())
+        {
+            <a asp-action="DownloadReport" class="btn btn-outline-secondary">
+                Download Report (PDF)
+            </a>
+        }
+        <a asp-action="Create" class="btn btn-primary">+ Add Item</a>
+    </div>
 </div>
 
 @if (!Model.Any())

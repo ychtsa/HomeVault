@@ -70,7 +70,8 @@ namespace HomeVault.Tests
             CatalogDbContext context, string catalogId)
         {
             ICatalogImageStorage storage = new Mock<ICatalogImageStorage>().Object;
-            ItemsController controller = new ItemsController(context, storage);
+            IInsuranceReportGenerator reportGen = new Mock<IInsuranceReportGenerator>().Object;
+            ItemsController controller = new ItemsController(context, storage, reportGen);
 
             List<Claim> claims = new List<Claim>
             {

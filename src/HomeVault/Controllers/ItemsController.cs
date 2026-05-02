@@ -36,11 +36,16 @@ namespace HomeVault.Controllers
 
         private readonly CatalogDbContext _context;
         private readonly ICatalogImageStorage _imageStorage;
+        private readonly IInsuranceReportGenerator _reportGenerator;
 
-        public ItemsController(CatalogDbContext context, ICatalogImageStorage imageStorage)
+        public ItemsController(
+            CatalogDbContext context,
+            ICatalogImageStorage imageStorage,
+            IInsuranceReportGenerator reportGenerator)
         {
             _context = context;
             _imageStorage = imageStorage;
+            _reportGenerator = reportGenerator;
         }
 
         /*
@@ -62,6 +67,32 @@ namespace HomeVault.Controllers
                 .ToListAsync();
 
             return View(items);
+        }
+
+        // ===== INSURANCE REPORT (PDF) ====================================
+
+        /*
+         * Function: DownloadReport() [GET]
+         * Description: Streams a freshly-rendered PDF inventory of every
+         *              item in the signed-in user's catalog. Suitable for
+         *              handing to an insurer.
+         * Return: IActionResult - File result with the PDF bytes.
+         */
+        [HttpGet]
+        public async Task<IActionResult> DownloadReport()
+        {
+            Resident? resident = await _context.Residents
+                .FirstOrDefaultAsync(r => r.CatalogId == CurrentCatalogId);
+            if (resident == null) return NotFound();
+
+            List<CatalogItem> items = await _context.CatalogItems
+                .Where(i => i.CatalogId == CurrentCatalogId)
+                .OrderBy(i => i.ItemName)
+                .ToListAsync();
+
+            byte[] pdf = _reportGenerator.Generate(resident, items);
+            string filename = $"homevault-inventory-{DateTime.UtcNow:yyyy-MM-dd}.pdf";
+            return File(pdf, "application/pdf", filename);
         }
 
         // ===== IMAGE (authorized static-like serving) ====================

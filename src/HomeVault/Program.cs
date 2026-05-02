@@ -15,8 +15,13 @@ using HomeVault.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Infrastructure;
 using Serilog;
 using System.Threading.RateLimiting;
+
+// QuestPDF is free for personal use, OSS, and companies under $1M revenue
+// under the Community license. Required to be set before any PDF is rendered.
+QuestPDF.Settings.License = LicenseType.Community;
 
 // ----- Bootstrap logger -----
 // A static logger is created up-front so any startup failure is captured.
@@ -114,6 +119,9 @@ try
     // App_Data/uploads/. Production deployments could substitute Azure Blob
     // Storage, S3, etc., behind the same interface.
     builder.Services.AddSingleton<ICatalogImageStorage, FilesystemCatalogImageStorage>();
+
+    // PDF insurance-report generator (QuestPDF).
+    builder.Services.AddSingleton<IInsuranceReportGenerator, QuestPdfInsuranceReportGenerator>();
 
     var app = builder.Build();
 
