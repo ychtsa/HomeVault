@@ -29,6 +29,8 @@ namespace HomeVault.Controllers
     public class AccountController : Controller
     {
         private const int ResetTokenLifetimeMinutes = 60;
+        private const int MaxFailedLoginAttempts = 10;
+        private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
 
         private readonly CatalogDbContext _context;
         private readonly IEmailSender _emailSender;
@@ -65,15 +67,70 @@ namespace HomeVault.Controllers
                 .Include(u => u.Resident)
                 .FirstOrDefaultAsync(u => u.Username == model.Username);
 
-            if (user == null || !BCrypt.Net.BCrypt.Verify(model.Password, user.PasswordHash))
+            // Unknown username — same generic error as bad password to
+            // avoid username enumeration.
+            if (user == null)
             {
                 _logger.LogWarning(
-                    "Failed login attempt for {Username} from {RemoteIp}",
-                    model.Username,
-                    HttpContext.Connection.RemoteIpAddress);
+                    "Failed login attempt for unknown username {Username} from {RemoteIp}",
+                    model.Username, HttpContext.Connection.RemoteIpAddress);
                 ModelState.AddModelError("", "Invalid username or password.");
                 return View(model);
             }
+
+            // Auto-expire any stale lockout before checking it.
+            if (user.LockedUntil != null && user.LockedUntil <= DateTime.UtcNow)
+            {
+                user.LockedUntil = null;
+                // FailedLoginAttempts was already cleared when the lockout was set.
+            }
+
+            bool passwordCorrect = BCrypt.Net.BCrypt.Verify(model.Password, user.PasswordHash);
+
+            if (user.LockedUntil != null)
+            {
+                // The account is currently locked. Tell the legitimate
+                // owner (correct password) why; show the generic error to
+                // anyone else so the lockout state isn't a leak.
+                if (passwordCorrect)
+                {
+                    int minutes = (int)Math.Ceiling(
+                        (user.LockedUntil.Value - DateTime.UtcNow).TotalMinutes);
+                    ModelState.AddModelError("",
+                        $"This account is temporarily locked due to too many failed " +
+                        $"sign-in attempts. Try again in {minutes} minute(s).");
+                }
+                else
+                {
+                    ModelState.AddModelError("", "Invalid username or password.");
+                }
+                return View(model);
+            }
+
+            if (!passwordCorrect)
+            {
+                user.FailedLoginAttempts++;
+                if (user.FailedLoginAttempts >= MaxFailedLoginAttempts)
+                {
+                    user.LockedUntil = DateTime.UtcNow.Add(LockoutDuration);
+                    user.FailedLoginAttempts = 0;
+                    _logger.LogWarning(
+                        "Account {Username} locked until {LockedUntil} after repeated failures",
+                        user.Username, user.LockedUntil);
+                }
+                await _context.SaveChangesAsync();
+
+                _logger.LogWarning(
+                    "Failed login attempt for {Username} from {RemoteIp}",
+                    model.Username, HttpContext.Connection.RemoteIpAddress);
+                ModelState.AddModelError("", "Invalid username or password.");
+                return View(model);
+            }
+
+            // Successful login — clear any leftover failure state.
+            user.FailedLoginAttempts = 0;
+            user.LockedUntil = null;
+            await _context.SaveChangesAsync();
 
             List<Claim> claims = new List<Claim>
             {

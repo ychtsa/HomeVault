@@ -7,7 +7,11 @@
  *              unique and used for password recovery; the recovery flow
  *              persists only a SHA-256 hash of the issued reset token plus
  *              its expiry timestamp, so a leaked database cannot be used
- *              to reset arbitrary user passwords.
+ *              to reset arbitrary user passwords. Repeated failed logins
+ *              accumulate against FailedLoginAttempts; once the threshold
+ *              is reached the account is locked until LockedUntil passes,
+ *              defeating slow distributed brute-force attacks that bypass
+ *              the per-IP rate limiter.
  */
 
 using System.ComponentModel.DataAnnotations;
@@ -40,6 +44,14 @@ namespace HomeVault.Models.Entities
         // UTC expiry of the active reset token. Tokens older than this are
         // ignored even if the hash matches.
         public DateTime? PasswordResetTokenExpiresAt { get; set; }
+
+        // Running count of consecutive failed login attempts. Reset to 0
+        // on successful login or when a lockout is applied.
+        public int FailedLoginAttempts { get; set; }
+
+        // UTC moment at which the lockout expires; null when the account
+        // is not locked. Compared against DateTime.UtcNow on each login.
+        public DateTime? LockedUntil { get; set; }
 
         // Navigation property
         public Resident Resident { get; set; } = null!;
