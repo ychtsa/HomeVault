@@ -14,8 +14,18 @@
 
 <h4 class="mt-4">What we store</h4>
 <p class="small">
-    Only what you provide: a username, a password, your name and address,
-    and the items you choose to catalog. Nothing else is collected.
+    Only what you provide: a username, an email address, a password,
+    your name and address, the items you choose to catalog, and any
+    photos you upload for those items. Nothing else is collected.
+</p>
+
+<h4 class="mt-4">How your email is used</h4>
+<p class="small">
+    Your email address is used solely to identify your account during
+    password recovery — it is never shared, sold, or sent marketing
+    material. Password-reset links are valid for 60 minutes and only the
+    SHA-256 hash of the token is stored, so a database leak alone cannot
+    be used to reset anyone's password.
 </p>
 
 <h4 class="mt-4">How passwords are handled</h4>
@@ -25,12 +35,13 @@
     recovered — only verified at login time.
 </p>
 
-<h4 class="mt-4">Data isolation</h4>
+<h4 class="mt-4">Data and image isolation</h4>
 <p class="small">
     Every catalog operation is scoped to the CatalogId stored in your
-    auth cookie. The database queries themselves filter by that id, so a
-    user cannot see or modify another user's items even with a crafted
-    request.
+    auth cookie. Database queries filter by that id, and uploaded photos
+    are served only by an authorized action that re-applies the same
+    filter, so a user cannot see or modify another user's items or
+    photos even with a crafted request.
 </p>
 
 <h4 class="mt-4">Third parties</h4>
