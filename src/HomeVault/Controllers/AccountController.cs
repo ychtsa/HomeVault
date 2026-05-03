@@ -171,6 +171,7 @@ namespace HomeVault.Controllers
         public IActionResult ForgotPassword() => View(new ForgotPasswordViewModel());
 
         [HttpPost, AllowAnonymous, ValidateAntiForgeryToken]
+        [EnableRateLimiting("forgotPassword")]
         public async Task<IActionResult> ForgotPassword(ForgotPasswordViewModel model)
         {
             if (!ModelState.IsValid) return View(model);

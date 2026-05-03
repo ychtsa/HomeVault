@@ -83,7 +83,10 @@ try
         options.Cookie.SameSite = SameSiteMode.Lax;
     });
 
-    // Rate limiting: brute-force protection for /Account/Login.
+    // Rate limiting:
+    //   "login"          - 5 / IP / minute. Caps brute-force on credentials.
+    //   "forgotPassword" - 3 / IP / 10 min. Caps email-bombing and DB-write
+    //                      abuse from anonymous attackers.
     builder.Services.AddRateLimiter(options =>
     {
         options.AddPolicy("login", httpContext =>
@@ -96,12 +99,22 @@ try
                     QueueLimit = 0
                 }));
 
+        options.AddPolicy("forgotPassword", httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 3,
+                    Window = TimeSpan.FromMinutes(10),
+                    QueueLimit = 0
+                }));
+
         options.OnRejected = async (context, token) =>
         {
             context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             context.HttpContext.Response.Headers.RetryAfter = "60";
             await context.HttpContext.Response.WriteAsync(
-                "Too many login attempts. Please try again in a minute.", token);
+                "Too many requests. Please try again later.", token);
         };
     });
 

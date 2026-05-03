@@ -62,5 +62,42 @@ namespace HomeVault.Tests
 
             Assert.Fail($"Expected 429 within 8 attempts; final status was {lastStatus}.");
         }
+
+        /*
+         * Function: PostForgotPassword_BeyondLimit_Returns429()
+         * Description: The forgot-password policy permits 3 attempts per IP
+         *              per 10 minutes. After firing more than that, at
+         *              least one response must come back as 429 with a
+         *              Retry-After hint. Prevents email-bombing and
+         *              DB-write abuse against the public reset endpoint.
+         */
+        [Fact]
+        public async Task PostForgotPassword_BeyondLimit_Returns429()
+        {
+            HttpClient client = _factory.CreateClient(new()
+            {
+                AllowAutoRedirect = false
+            });
+
+            HttpStatusCode? lastStatus = null;
+            for (int i = 0; i < 6; i++)
+            {
+                FormUrlEncodedContent body = new(new[]
+                {
+                    new KeyValuePair<string, string>("Email", $"spam{i}@example.com")
+                });
+
+                HttpResponseMessage response = await client.PostAsync("/Account/ForgotPassword", body);
+                lastStatus = response.StatusCode;
+
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    Assert.True(response.Headers.Contains("Retry-After"));
+                    return;
+                }
+            }
+
+            Assert.Fail($"Expected 429 within 6 attempts; final status was {lastStatus}.");
+        }
     }
 }
