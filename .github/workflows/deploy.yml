@@ -1,0 +1,129 @@
+name: Deploy free Azure
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_only:
+        description: Publish the first GHCR image; skip all Azure operations
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homevault-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      !github.event.repository.private &&
+      (vars.AZURE_DEPLOY_ENABLED == 'true' || inputs.publish_only == true) &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+      AZURE_SQL_SERVER: ${{ vars.AZURE_SQL_SERVER }}
+      AZURE_SQL_DATABASE: ${{ vars.AZURE_SQL_DATABASE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - name: Resolve immutable image and temporary firewall name
+        shell: bash
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          sha=$(git rev-parse HEAD)
+          echo "IMAGE=ghcr.io/${repository}:${sha}" >> "$GITHUB_ENV"
+          echo "SQL_RUNNER_RULE=github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+      - name: Require successful CI for a manually selected commit
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_only != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          count=$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" -f head_sha="$sha" -f branch=main -f event=push -f status=success --jq '.total_count')
+          test "$count" -gt 0 || { echo 'This commit must pass CI on main before Azure deployment.' >&2; exit 1; }
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish Linux image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      - name: Require anonymous public image access
+        if: inputs.publish_only != true
+        run: |
+          mkdir -p "$RUNNER_TEMP/ghcr-anonymous"
+          docker --config "$RUNNER_TEMP/ghcr-anonymous" manifest inspect "$IMAGE" > /dev/null || {
+            echo 'Set the GHCR package visibility to Public, then rerun. Azure deployment has not started.' >&2
+            exit 1
+          }
+      - name: Sign in to Azure using OIDC
+        if: inputs.publish_only != true
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify free resources before modifying Azure
+        if: inputs.publish_only != true
+        run: bash scripts/check-free-azure.sh
+      - name: Allow application egress and temporary migration access
+        id: migration_firewall
+        if: inputs.publish_only != true
+        run: |
+          bash scripts/sync-sql-firewall.sh
+          runner_ip=$(curl --fail --silent --show-error https://api.ipify.org)
+          python3 -c 'import ipaddress,sys; ipaddress.IPv4Address(sys.argv[1])' "$runner_ip"
+          az sql server firewall-rule create --resource-group "$AZURE_RESOURCE_GROUP" --server "$AZURE_SQL_SERVER" --name "$SQL_RUNNER_RULE" --start-ip-address "$runner_ip" --end-ip-address "$runner_ip" --output none
+          echo 'created=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-dotnet@v4
+        if: inputs.publish_only != true
+        with:
+          dotnet-version: 8.0.x
+      - name: Apply migrations using the separate deploy identity
+        if: inputs.publish_only != true
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          ConnectionStrings__DefaultConnection: Server=tcp:${{ vars.AZURE_SQL_SERVER }}.database.windows.net,1433;Database=${{ vars.AZURE_SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True;TrustServerCertificate=False;Connection Timeout=60
+        run: dotnet run --project src/HomeVault/HomeVault.csproj --configuration Release --no-launch-profile -- --migrate-only
+      - name: Deploy the verified image
+        if: inputs.publish_only != true
+        run: |
+          az webapp config container set --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME" --container-image-name "$IMAGE" --container-registry-url https://ghcr.io --output none
+          az webapp restart --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME"
+      - name: Verify database health and React entry point
+        if: inputs.publish_only != true
+        run: |
+          hostname=$(az webapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_WEBAPP_NAME" --query defaultHostName --output tsv)
+          curl --fail --silent --show-error --retry 15 --retry-all-errors --retry-delay 10 --max-time 30 "https://${hostname}/health"
+          curl --fail --silent --show-error --max-time 30 "https://${hostname}/app/" | grep -q 'id="root"'
+      - name: Remove temporary runner firewall rule
+        if: always() && steps.migration_firewall.outputs.created == 'true'
+        run: |
+          az sql server firewall-rule delete --resource-group "$AZURE_RESOURCE_GROUP" --server "$AZURE_SQL_SERVER" --name "$SQL_RUNNER_RULE" --output none

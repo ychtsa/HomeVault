@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "prefix": { "value": "homevault" },
+    "githubOidcSubject": { "value": "repo:ychtsa/HomeVault:environment:production" },
+    "sqlAdminObjectId": { "value": "REPLACE-WITH-ENTRA-USER-OR-GROUP-OBJECT-ID" },
+    "sqlAdminName": { "value": "REPLACE-WITH-ENTRA-USER-OR-GROUP-NAME" },
+    "sqlAdminPrincipalType": { "value": "User" },
+    "appServiceSku": { "value": "F1" },
+    "containerImage": { "value": "ghcr.io/ychtsa/homevault:bootstrap" }
+  }
+}

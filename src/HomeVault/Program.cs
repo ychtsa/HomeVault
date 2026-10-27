@@ -12,9 +12,14 @@
 using HomeVault.Data;
 using HomeVault.Middleware;
 using HomeVault.Services;
+using Azure.Identity;
+using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi.Models;
 using QuestPDF.Infrastructure;
 using Serilog;
 using System.Threading.RateLimiting;
@@ -39,13 +44,46 @@ try
 {
     Log.Information("Starting HomeVault");
 
-    var builder = WebApplication.CreateBuilder(args);
+    var migrateOnly = args.Contains("--migrate-only", StringComparer.Ordinal);
+    var builder = WebApplication.CreateBuilder(args.Where(arg => arg != "--migrate-only").ToArray());
 
     // ----- Logging -----
     builder.Host.UseSerilog();
 
     // ----- Services -----
     builder.Services.AddControllersWithViews();
+    builder.Services.AddProblemDetails();
+    builder.Services.AddExceptionHandler<ApiExceptionHandler>();
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen(options =>
+    {
+        options.SwaggerDoc("v1", new OpenApiInfo
+        {
+            Title = "HomeVault API", Version = "v1",
+            Description = "Private household inventory. Sign in through /api/auth/login. " +
+                "Cookie authentication and X-CSRF-TOKEN protect writes. Swagger UI obtains CSRF tokens automatically."
+        });
+        options.DocInclusionPredicate((_, description) =>
+            description.RelativePath?.StartsWith("api/", StringComparison.OrdinalIgnoreCase) == true);
+    });
+
+    // Persist the cookie key ring across container replacements and App Service instances.
+    var dataProtection = builder.Services.AddDataProtection().SetApplicationName("HomeVault");
+    if (builder.Configuration["DataProtection:KeysPath"] is { Length: > 0 } keysPath)
+        dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        // Enable only behind an ingress which prevents direct access to Kestrel.
+        if (builder.Configuration.GetValue<bool>("ForwardedHeaders:TrustAllProxies"))
+        {
+            options.KnownNetworks.Clear();
+            options.KnownProxies.Clear();
+        }
+        foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
+            options.KnownProxies.Add(System.Net.IPAddress.Parse(proxy));
+    });
 
     // EF Core: SQL Server. Connection string lives in user-secrets (locally) or
     // in App Service Configuration (production) — never in source control.
@@ -74,6 +112,20 @@ try
             options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
             options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
             options.SlidingExpiration = true;
+            options.Events.OnRedirectToLogin = context =>
+            {
+                if (context.Request.Path.StartsWithSegments("/api"))
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                else context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            };
+            options.Events.OnRedirectToAccessDenied = context =>
+            {
+                if (context.Request.Path.StartsWithSegments("/api"))
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                else context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            };
         });
 
     // Anti-forgery cookie locked to HTTPS as well.
@@ -81,6 +133,7 @@ try
     {
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.Cookie.SameSite = SameSiteMode.Lax;
+        options.HeaderName = "X-CSRF-TOKEN";
     });
 
     // Rate limiting:
@@ -131,7 +184,26 @@ try
     // Per-catalog image storage. Backed by the local filesystem under
     // App_Data/uploads/. Production deployments could substitute Azure Blob
     // Storage, S3, etc., behind the same interface.
-    builder.Services.AddSingleton<ICatalogImageStorage, FilesystemCatalogImageStorage>();
+    var storageProvider = builder.Configuration["Storage:Provider"] ?? "FileSystem";
+    if (storageProvider.Equals("AzureBlob", StringComparison.OrdinalIgnoreCase))
+    {
+        builder.Services.AddSingleton(_ =>
+        {
+            var connectionString = builder.Configuration["Storage:ConnectionString"];
+            var service = !string.IsNullOrWhiteSpace(connectionString)
+                ? new BlobServiceClient(connectionString)
+                : new BlobServiceClient(
+                    new Uri(builder.Configuration["Storage:BlobServiceUri"]
+                        ?? throw new InvalidOperationException("Storage:BlobServiceUri is required for AzureBlob storage.")),
+                    new DefaultAzureCredential());
+            return service.GetBlobContainerClient(builder.Configuration["Storage:ContainerName"] ?? "catalog-images");
+        });
+        builder.Services.AddSingleton<ICatalogImageStorage, AzureBlobCatalogImageStorage>();
+    }
+    else if (storageProvider.Equals("FileSystem", StringComparison.OrdinalIgnoreCase))
+        builder.Services.AddSingleton<ICatalogImageStorage, FilesystemCatalogImageStorage>();
+    else
+        throw new InvalidOperationException($"Unknown storage provider: {storageProvider}");
 
     // PDF insurance-report generator (QuestPDF).
     builder.Services.AddSingleton<IInsuranceReportGenerator, QuestPdfInsuranceReportGenerator>();
@@ -141,8 +213,9 @@ try
     // ----- Apply migrations on startup -----
     // Real (relational) providers run migrations; in-memory providers used
     // by tests do not support Migrate() and use EnsureCreated() instead.
-    using (var scope = app.Services.CreateScope())
+    if (migrateOnly || builder.Configuration.GetValue("Database:ApplyMigrations", app.Environment.IsDevelopment()))
     {
+        using var scope = app.Services.CreateScope();
         CatalogDbContext context = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
         if (context.Database.IsRelational())
         {
@@ -153,18 +226,37 @@ try
             context.Database.EnsureCreated();
         }
     }
+    if (migrateOnly) return;
 
     // ----- HTTP pipeline -----
+    if (builder.Configuration.GetValue<bool>("ForwardedHeaders:Enabled"))
+        app.UseForwardedHeaders();
+
+    app.UseExceptionHandler("/Home/Error");
     if (!app.Environment.IsDevelopment())
     {
-        app.UseExceptionHandler("/Home/Error");
         app.UseHsts();
     }
 
-    app.UseHttpsRedirection();
+    // App Service probes its container over HTTP; all application traffic still requires HTTPS.
+    app.UseWhen(context => !context.Request.Path.Equals("/health"), branch => branch.UseHttpsRedirection());
 
     // Security headers applied to every response (including static files).
     app.UseMiddleware<SecurityHeadersMiddleware>();
+
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api"))
+            context.Response.Headers.CacheControl = "no-store";
+        await next();
+    });
+
+    app.UseStatusCodePages(async context =>
+    {
+        if (context.HttpContext.Request.Path.StartsWithSegments("/api"))
+            await Results.Problem(statusCode: context.HttpContext.Response.StatusCode)
+                .ExecuteAsync(context.HttpContext);
+    });
 
     app.UseStaticFiles();
 
@@ -178,7 +270,19 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
 
+    if (builder.Configuration.GetValue("Swagger:Enabled", app.Environment.IsDevelopment()))
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI(options =>
+        {
+            options.IndexStream = () => typeof(Program).Assembly
+                .GetManifestResourceStream("HomeVault.OpenApi.index.html")!;
+        });
+    }
+
     app.MapHealthChecks("/health");
+    app.MapControllers();
+    app.MapFallbackToFile("/app/{*path:nonfile}", "app/index.html");
 
     app.MapControllerRoute(
         name: "default",
@@ -189,6 +293,7 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "HomeVault terminated unexpectedly");
+    Environment.ExitCode = 1;
 }
 finally
 {

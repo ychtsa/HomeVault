@@ -14,9 +14,10 @@ namespace HomeVault.Services
     {
         private readonly string _rootPath;
 
-        public FilesystemCatalogImageStorage(IWebHostEnvironment env)
+        public FilesystemCatalogImageStorage(IWebHostEnvironment env, IConfiguration? configuration = null)
         {
-            _rootPath = Path.Combine(env.ContentRootPath, "App_Data", "uploads");
+            _rootPath = configuration?["Storage:FileSystemRoot"]
+                ?? Path.Combine(env.ContentRootPath, "App_Data", "uploads");
             Directory.CreateDirectory(_rootPath);
         }
 

@@ -1,35 +1,51 @@
-# FILE: ci.yml
-# PROJECT: HomeVault
-# DESCRIPTION: GitHub Actions workflow that builds the solution and runs
-#              the test suite on every push and pull request to main.
-#              Provides the green CI badge on the repo's README.
-
 name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 8 SDK
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-
-      - name: Restore dependencies
-        run: dotnet restore HomeVault.slnx
-
-      - name: Build solution
-        run: dotnet build HomeVault.slnx --configuration Release --no-restore
-
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/HomeVault.Client/package-lock.json
+      - name: Build React and type-check TypeScript
+        working-directory: src/HomeVault.Client
+        run: |
+          npm ci
+          npm test
+          npm run build
+      # .slnx requires a newer SDK. Explicit project paths work with the .NET 8 SDK.
+      - name: Restore and build server and tests
+        run: |
+          dotnet restore tests/HomeVault.Tests/HomeVault.Tests.csproj
+          dotnet build tests/HomeVault.Tests/HomeVault.Tests.csproj --configuration Release --no-restore
       - name: Run tests
-        run: dotnet test HomeVault.slnx --configuration Release --no-build --verbosity normal
+        run: dotnet test tests/HomeVault.Tests/HomeVault.Tests.csproj --configuration Release --no-build --logger "trx;LogFileName=tests.trx"
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: tests/HomeVault.Tests/TestResults/*.trx
+      - name: Compile Azure infrastructure
+        run: az bicep build --file infra/main.bicep --outfile /tmp/homevault-arm.json
+      - name: Verify deployment rejects paid Azure configurations
+        run: python3 tests/test_free_azure.py
+      - name: Build production container
+        run: docker build --tag homevault:ci .

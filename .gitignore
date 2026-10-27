@@ -493,3 +493,14 @@ logs/
 # User-uploaded item images — never committed
 src/HomeVault/App_Data/
 
+# React build output, dependency/cache directories, and local deployment secrets
+**/node_modules/
+**/.npm-cache/
+**/*.tsbuildinfo
+src/HomeVault/wwwroot/app/
+src/HomeVault.Client/coverage/
+.env
+.env.*
+!.env.example
+infra/main.json
+

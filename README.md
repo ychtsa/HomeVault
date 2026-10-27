@@ -2,201 +2,154 @@
 
 [![CI](https://github.com/ychtsa/HomeVault/actions/workflows/ci.yml/badge.svg)](https://github.com/ychtsa/HomeVault/actions/workflows/ci.yml)
 
-> A personal home-inventory web application built with ASP.NET Core 8 — track every item that matters, know what it's worth, and have the records ready before you ever need them.
+私人家庭物品清單：記錄物品與價值、保存照片，並匯出保險用 PDF。每位使用者的清單、照片與報表皆依登入身分的 `CatalogId` 隔離。
 
-HomeVault is a multi-tenant insurance catalog where each resident logs in to manage their own private list of household items, attach photos, and download a printable PDF inventory ready to hand to an insurer. The project's focus is **secure-by-default data isolation**: every database query, every uploaded image, and every generated report is scoped by the user's `CatalogId` so one resident can never see or modify another resident's data, even with a crafted request.
+## 功能與架構
 
----
+| 部分 | 實作 |
+| --- | --- |
+| Web API | ASP.NET Core 8、`[ApiController]`、JSON／Problem Details、Swagger UI |
+| 資料庫 | EF Core 8 + SQL Server；Azure 使用 SQL 免費方案與受控識別 |
+| 前端 | React + TypeScript + Vite，繁體中文響應式介面，入口 `/app/` |
+| 照片 | 免費部署使用持久化 `/home/uploads`；亦提供可選的私人 Azure Blob 實作 |
+| 容器 | 多階段 Docker build，整合 React 靜態檔案，非 root 執行 |
+| CI/CD | PR／main 建置測試；main 通過後以 GitHub OIDC 部署公開 GHCR 的 SHA 標記映像 |
+| Azure | Bicep 限定 Linux F1、SQL 免費額度用完即暫停，不建立 ACR 或 Blob |
 
-## Highlights
+**依零 Azure 費用要求提供可部署版本，尚未建立 Azure 資源或實際上線。** 部署前須設定自己的 Azure 訂閱、GitHub environment 與 SQL 使用者，詳見 [Azure 部署指南](docs/azure-deployment.md)。
 
-- **Full account lifecycle** — sign up with email, log in, **password recovery** by email link with single-use tokens (SHA-256-hashed at rest, 60-min expiry), CSRF-protected logout.
-- **Per-user data isolation** enforced at the query level for both rows and image bytes. Validated by automated security tests.
-- **Photo upload** for every catalog item — stored outside `wwwroot`, served via authorized `/Items/Image/{id}` action that re-applies the same `CatalogId`-claim isolation as the rest of the API.
-- **PDF insurance report** — one click on the catalog page produces a printable A4 inventory (resident details, items table, totals, page numbers) ready for an insurance claim.
-- **Brute-force protection** — login rate-limited to 5 attempts per IP per minute, with `Retry-After` hints. Failed logins are logged with username + IP for SIEM ingestion.
-- **Hardened response headers** — strict CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy` on every response.
-- **Structured logging** — Serilog console + rolling file sink (`logs/homevault-*.log`, 14-day retention) with one structured line per HTTP request.
-- **Health endpoint** — `/health` pings the DB via the EF Core health check, ready to wire to a load balancer or uptime monitor.
-- **Resilient data layer** — `EnableRetryOnFailure()` on the DbContext absorbs transient SQL outages with exponential backoff.
-- **End-to-end tested** — 14 tests covering BCrypt hashing, signup, cross-tenant isolation, security headers, anti-forgery, the full HTTP pipeline, and the rate limiter actually returning 429.
+React 和原有 MVC 共用同一個 ASP.NET Core host、資料庫及登入 cookie。既有 Razor 頁面仍可使用；`/app/` 為新前端，API 入口為 `/api/`。同來源架構不需開放跨站 CORS，也不把登入憑證存進 localStorage。
 
----
+## 本機開發
 
-## Tech stack
+需要 .NET 8 SDK、Node.js 22、SQL Server。Windows 可使用 LocalDB；Docker 的 SQL Server Linux 映像需要 x86-64，Apple Silicon 限制見部署指南。
 
-| Layer | Choice |
-|---|---|
-| Framework | ASP.NET Core 8 (MVC + Razor) |
-| ORM | Entity Framework Core 8.0.10 (SQL Server, with retry-on-failure) |
-| Database | SQL Server (LocalDB or full SQL Server) |
-| Auth | Cookie authentication scheme |
-| Password hashing | BCrypt.Net-Next 4.1.0 |
-| Rate limiting | `Microsoft.AspNetCore.RateLimiting` (built-in, .NET 8) |
-| PDF generation | QuestPDF 2024.7 (Community license) |
-| Logging | Serilog (console + rolling file sink) |
-| Health checks | `Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore` |
-| Tests | xUnit + Moq + EF Core InMemory + `WebApplicationFactory<Program>` |
-| CI | GitHub Actions |
-| UI | Bootstrap 5 |
+1. 設定資料庫連線，使用 user-secrets，勿提交密碼至 Git：
 
----
-
-## Security architecture
-
-HomeVault treats catalog isolation as a **database-level concern**, not just a controller-level one.
-
-1. On login, the user's `CatalogId` is written into the auth cookie as a claim.
-2. Every read/write in `ItemsController` is filtered by `CurrentCatalogId` from that claim:
-   ```csharp
-   await _context.CatalogItems
-       .FirstOrDefaultAsync(i => i.ItemId == id && i.CatalogId == CurrentCatalogId);
-   ```
-3. A request with a guessed `ItemId` belonging to another user resolves to `null` and the controller returns `NotFound()` — no information leaked, no cross-tenant access possible.
-
-The same guarantee applies to **uploaded photos**: image bytes live at `App_Data/uploads/{CatalogId}/{ItemId}` (outside `wwwroot`) and are served only by an authorized `/Items/Image/{id}` action that re-runs the `CatalogId` filter. There is no static URL for any photo.
-
-This claim is proven correct by `tests/HomeVault.Tests/CatalogIsolationTests.cs`, which seeds two users in an in-memory database and asserts that:
-- `Index` returns only the signed-in user's items
-- `Edit` for another user's item returns `404`
-- `Delete` for another user's item returns `404`
-
-These tests run on every push to `main`.
-
----
-
-## Security defenses
-
-Beyond the data-isolation guarantee tested above, HomeVault layers in standard web-app hardening:
-
-| Defense | Where | What it does |
-|---|---|---|
-| **Brute-force login protection** | `Program.cs` rate limiter + `[EnableRateLimiting("login")]` | 5 attempts per IP per minute → `429 Too Many Requests` with `Retry-After: 60` |
-| **BCrypt password hashing** | `AccountController.Signup` / `Login` / `ResetPassword` | Salted, slow hash; resistant to rainbow tables and parallel cracking |
-| **Strong password policy** | `SignupViewModel`, `ResetPasswordViewModel` | Minimum 8 characters, must contain at least one letter and one digit |
-| **Hashed reset tokens** | `AccountController.ForgotPassword` | 32-byte URL-safe tokens; only their SHA-256 hash is persisted, with 60-minute expiry; cleared on use |
-| **Email-enumeration prevention** | `ForgotPassword` / `Login` | Same confirmation page is shown whether or not the email exists; same generic error on bad credentials |
-| **Secure cookies** | `Program.cs` cookie auth options | `HttpOnly`, `SameSite=Lax`, `SecurePolicy=Always` (HTTPS-only) |
-| **CSRF protection** | `[ValidateAntiForgeryToken]` on every POST | Anti-forgery cookie also marked `Secure` |
-| **HTTPS enforcement** | `app.UseHttpsRedirection()` + HSTS in production | Forces TLS, removes mixed-content downgrade risk |
-| **Strict CSP** | `SecurityHeadersMiddleware` | `default-src 'self'`, no inline scripts, no framing — mitigates most XSS |
-| **Clickjacking protection** | `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` | Page cannot be embedded in any iframe |
-| **MIME-sniffing protection** | `X-Content-Type-Options: nosniff` | Browsers honor declared `Content-Type` |
-| **Referrer minimization** | `Referrer-Policy: strict-origin-when-cross-origin` | Cross-origin requests leak only the origin, not the full URL |
-| **Browser feature lockdown** | `Permissions-Policy` | Camera, microphone, geolocation explicitly disabled |
-| **Image-byte isolation** | `/Items/Image/{id}` authorized action | Photos live outside `wwwroot`; served only after the same `CatalogId` filter applied to other reads |
-| **Upload validation** | `ItemsController.ValidateUploadedImage` | 5 MB cap; allow-listed content types (`image/jpeg`, `image/png`, `image/webp`); path-traversal-safe filenames |
-| **Open-redirect prevention** | `LocalRedirect()` for post-login `returnUrl` | External URLs are rejected by the framework |
-| **Failed-login logging** | `_logger.LogWarning(...)` in `AccountController.Login` | Structured warning per failure with username + remote IP |
-| **Parameterized queries** | All DB access via EF Core LINQ | No string-concatenated SQL anywhere — SQL injection impossible by construction |
-
----
-
-## Operational readiness
-
-| Concern | Implementation |
-|---|---|
-| Structured logging | Serilog with console + rolling file sink (`logs/homevault-{YYYYMMDD}.log`, 14-day retention). `UseSerilogRequestLogging` writes one line per HTTP request with method, path, status, and duration. |
-| Health check | `GET /health` pings the database via the EF Core health check. Returns 200 OK / 503 with the failing component, ready for load balancers and uptime monitors. |
-| Transient SQL resilience | `EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: 5s)` on the DbContext absorbs network blips, failovers, and SQL throttling. |
-| Outbound email | Routed through `IEmailSender`. The bundled `LogEmailSender` writes to the app log so the password-reset flow runs end-to-end without an SMTP server. Production swaps in an SMTP / SendGrid implementation behind the same interface. |
-| Image storage | `ICatalogImageStorage` abstraction. The default `FilesystemCatalogImageStorage` writes to `App_Data/uploads/`; cloud deployments can substitute Azure Blob Storage / S3 without touching controllers. |
-| PDF generation | `IInsuranceReportGenerator` (QuestPDF Community license) renders an A4 report with header, items table, totals, and page numbers. Wrapping it in an interface keeps the controller library-agnostic. |
-
----
-
-## Getting started
-
-### Prerequisites
-
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- SQL Server — [LocalDB](https://learn.microsoft.com/en-us/sql/database-engine/configure-windows/sql-server-express-localdb) on Windows is the simplest option
-
-### Setup
-
-1. Clone the repository:
    ```bash
-   git clone https://github.com/ychtsa/HomeVault.git
-   cd HomeVault
+   dotnet user-secrets set "ConnectionStrings:DefaultConnection" "YOUR_SQL_SERVER_CONNECTION_STRING" --project src/HomeVault
    ```
 
-2. Configure the connection string via [.NET user secrets](https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets) — never commit it to source:
+2. 建置前端並啟動 HTTPS 後端：
+
    ```bash
-   cd src/HomeVault
-   dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\\mssqllocaldb;Database=HomeVault;Trusted_Connection=True;MultipleActiveResultSets=true"
+   npm ci --prefix src/HomeVault.Client
+   npm run build --prefix src/HomeVault.Client
+   dotnet dev-certs https --trust
+   dotnet run --project src/HomeVault --launch-profile https
    ```
 
-3. Run the app:
-   ```bash
-   dotnet run
-   ```
-   EF Core applies pending migrations automatically on startup.
+3. 開啟 **https://localhost:7031/app/**；Swagger 為 **https://localhost:7031/swagger/**。
 
-4. Open https://localhost:5001 (or whichever port is reported on launch), click **Sign up**, and create your own account.
-
-### Suggested demo path (for evaluators)
-
-1. **Sign up** — create an account with any email; the password rules require ≥ 8 chars + a letter + a digit.
-2. **Add an item** with a photo upload (JPEG / PNG / WebP, ≤ 5 MB).
-3. **Download Report** on the catalog page — produces a PDF.
-4. **Open browser dev tools** on any page and check the response headers — every response carries the strict CSP, `X-Frame-Options: DENY`, etc.
-5. **Try guessing another user's URL** — e.g., visit `/Items/Edit/abcde` for an `ItemId` you don't own. Returns `404`, not the item.
-6. **Forgot password flow** — log out, click "Forgot your password?", enter the email you used at signup. Look in the **app log** (console or `logs/homevault-{date}.log`) for a line starting with `[EMAIL]` containing the reset link. Open the link, choose a new password, log in.
-
----
-
-## Running the tests
+Development 預設自動套用 EF migrations。Production 預設不會執行 DDL，使用獨立部署身分事先套用：
 
 ```bash
-dotnet test HomeVault.slnx
+dotnet run --project src/HomeVault --no-launch-profile -- --migrate-only
 ```
 
-The 14-test suite covers:
+此指令套用 migrations 後結束，失敗時回傳非零 exit code。連線仍由 user-secrets 或 `ConnectionStrings__DefaultConnection` 環境變數提供。
 
-- **`BCryptTests`** — round-trip hashing, wrong-password rejection, salt uniqueness.
-- **`SignupTests`** — duplicate-username rejection and atomic Catalog/Resident/User creation.
-- **`CatalogIsolationTests`** — cross-tenant access on `Index`, `Edit`, and `Delete` returns 404.
-- **`IntegrationTests`** — full HTTP pipeline: anonymous root redirect, `/health`, security headers stamped on every response, anti-forgery enforcement, anti-forgery token rendered into the form HTML.
-- **`RateLimitingTests`** — `POST /Account/Login` returns `429 Too Many Requests` with `Retry-After` after the configured threshold.
+修改 React 時，可另外執行 `npm run dev --prefix src/HomeVault.Client`。Vite 將 `/api` 代理至 `https://localhost:7031`，後端需同時執行。正式發佈前執行 `npm run build`，輸出至 `src/HomeVault/wwwroot/app`。Dockerfile 會自動完成這一步；單獨 `dotnet publish` 前也須先建置 React。
 
-All tests run automatically in CI on every push and pull request to `main`.
+## Docker
 
----
-
-## Project structure
-
-```
-HomeVault/
-├── src/HomeVault/                  ASP.NET Core MVC application
-│   ├── Controllers/                Account, Home, Items
-│   ├── Data/                       EF Core DbContext
-│   ├── Middleware/                 Custom middleware (security headers)
-│   ├── Models/
-│   │   ├── Entities/               Catalog, CatalogItem, Resident, ResidentUser
-│   │   └── ViewModels/             Login, Signup, ForgotPassword, ResetPassword,
-│   │                               CatalogItemForm
-│   ├── Services/                   IEmailSender / LogEmailSender,
-│   │                               ICatalogImageStorage / FilesystemCatalogImageStorage,
-│   │                               IInsuranceReportGenerator / QuestPdfInsuranceReportGenerator
-│   ├── Views/                      Razor templates (Account, Home, Items, Shared)
-│   ├── Migrations/                 EF Core migrations
-│   ├── App_Data/uploads/           Per-catalog photo storage (gitignored)
-│   ├── wwwroot/                    Static assets (CSS, JS, libs)
-│   ├── logs/                       Serilog rolling-file output (gitignored)
-│   └── Program.cs                  Composition root
-├── tests/HomeVault.Tests/          xUnit test project
-│   ├── BCryptTests.cs
-│   ├── SignupTests.cs
-│   ├── CatalogIsolationTests.cs
-│   ├── IntegrationTests.cs
-│   ├── RateLimitingTests.cs
-│   └── HomeVaultWebAppFactory.cs   Test host with InMemory DB
-├── .github/workflows/ci.yml        Build + test on push/PR to main
-└── HomeVault.slnx                  Solution file
+```bash
+cp .env.example .env
+# 編輯 .env，設定自己的 MSSQL_SA_PASSWORD
+docker compose up --build -d
 ```
 
----
+使用 **https://localhost:8443/app/**；本機 Caddy 憑證的信任設定見 [部署指南](docs/azure-deployment.md)。SQL、照片與 cookie 金鑰皆使用持久化 volumes。`docker compose down` 會保留資料，`docker compose down -v` 會刪除資料。
+
+## API
+
+Development 預設提供 `/swagger/` 與 `/swagger/v1/swagger.json`；其他環境需設定 `Swagger__Enabled=true`。Swagger UI 的寫入請求會自動取得當前身分的 CSRF token。
+
+| 方法 | 路徑 | 用途 |
+| --- | --- | --- |
+| GET | `/api/auth/csrf` | 取得 `{ token }` 與防偽 cookie |
+| POST | `/api/auth/signup` | 註冊；成功後再登入 |
+| POST | `/api/auth/login` | 登入，設定 HttpOnly cookie |
+| GET | `/api/auth/me` | 目前使用者 |
+| POST | `/api/auth/logout` | 登出 |
+| GET / POST | `/api/items` | 清單／新增物品 |
+| GET / PUT / DELETE | `/api/items/{id}` | 讀取／修改／刪除物品 |
+| GET / POST / DELETE | `/api/items/{id}/image` | 讀取／上傳／刪除照片 |
+| GET | `/api/items/report` | 匯出登入者的 PDF |
+
+物品寫入格式：
+
+```json
+{ "itemName": "相機", "itemType": "電子產品", "itemValue": 25000 }
+```
+
+名稱與類別最多 30 字元，價值為正整數。回應另含 `itemId` 和 `imageUrl`；不接受客戶端指定 `CatalogId`。照片用 `multipart/form-data` 的 `file` 欄位上傳，最多 5 MiB，接受 JPEG／PNG／WebP，API 會檢查檔案標頭。
+
+所有 POST、PUT、DELETE 均需先取得 CSRF token，再以 `X-CSRF-TOKEN` header 送出並帶上 cookie；登入／登出後須重新取得 token。未登入的 API 回傳 `401`，不導向 HTML；其他使用者的物品回傳 `404`。
+
+## 設定
+
+ASP.NET Core 設定在環境變數中以 `__` 代替 `:`：
+
+| 設定 | 預設／用途 |
+| --- | --- |
+| `ConnectionStrings:DefaultConnection` | SQL Server／Azure SQL 連線字串，必填 |
+| `Storage:Provider` | `FileSystem` 或 `AzureBlob` |
+| `Storage:BlobServiceUri` | Azure Blob endpoint，使用 `DefaultAzureCredential` |
+| `Storage:FileSystemRoot` | Azure 免費部署為 `/home/uploads`，與容器檔案系統分開 |
+| `Storage:ContainerName` | 可選 Azure Blob 實作的私人 container 名稱，預設 `catalog-images` |
+| `Storage:ConnectionString` | 可選的本機 Blob 連線字串，正式環境使用受控識別 |
+| `AZURE_CLIENT_ID` | Azure runtime managed identity client ID |
+| `DataProtection:KeysPath` | cookie 金鑰持久化路徑；Azure 為 `/home/keys` |
+| `Database:ApplyMigrations` | 未指定時只在 Development 自動執行 |
+| `Swagger:Enabled` | 未指定時只在 Development 啟用 |
+| `ForwardedHeaders:Enabled` | 預設 `false`，在反向代理後方時啟用 |
+| `ForwardedHeaders:TrustAllProxies` | 只用於無法直接連入容器的受控反向代理環境 |
+| `ForwardedHeaders:KnownProxies` | 自訂反向代理 IP 白名單 |
+
+`/health` 檢查資料庫連線，供 App Service 與 Docker 使用。Azure 的 HTTPS 由 App Service 終結；健康探測可使用內部 HTTP。
+
+## 安全與操作注意事項
+
+- 沿用 BCrypt、30 分鐘滑動 cookie、HTTPS、CSRF、登入速率限制與帳號鎖定。API 私人回應使用 `Cache-Control: no-store`。
+- 免費部署把照片存於 App Service 的持久化 `/home/uploads`，只能由授權端點讀取。F1 的 1 GB 檔案空間同時容納照片與 cookie 金鑰；容量用完須清理，不會升級儲存方案。
+- cookie 的 Data Protection 金鑰需持久化；Azure 掛載 `/home`，本機 Docker 掛載 `App_Data`。不要刪除金鑰 volume。
+- Azure SQL runtime 身分只有資料讀寫權限，migration 使用獨立部署身分。首次 SQL 使用者初始化步驟見部署指南。
+- 原有忘記密碼流程使用 `LogEmailSender`，不會寄出真正的信；提供正式密碼重設前需接上郵件服務。開發測試可在日誌取得重設連結。
+- 免費部署不建立 ACR、Blob、Log Analytics 或付費 App Service plan。SQL 設定 `useFreeLimit=true` 與 `AutoPause`，額度用完即暫停；部署前會檢查這些設定，失敗時停止。
+- F1 與 SQL 免費額度適合展示：有每日 CPU／儲存／每月計算配額，會休眠、冷啟動或暫停，沒有 SLA。若區域沒有免費容量，請停止部署，不要改選付費方案。
+
+## 驗證
+
+```bash
+dotnet test tests/HomeVault.Tests/HomeVault.Tests.csproj --configuration Release
+npm test --prefix src/HomeVault.Client
+npm run build --prefix src/HomeVault.Client
+docker build -t homevault:local .
+```
+
+後端測試涵蓋原有 MVC、帳號生命週期、API 認證／CSRF、跨租戶 CRUD／照片／報表隔離、上傳驗證、Swagger 文件與 Blob 錯誤處理。HTTP 整合測試使用 EF InMemory，不能取代 SQL Server／Azure SQL 部署驗證。
+
+CI 使用 `.csproj` 指令以相容 .NET 8 SDK；既有 `HomeVault.slnx` 可由支援該格式的新版 SDK 開啟。
+
+## 專案結構
+
+```text
+src/HomeVault/                 ASP.NET Core MVC + Web API
+  Controllers/Api/             JSON API controllers
+  Models/Api/                  API 請求及回應 DTO
+  Services/                    檔案／Azure Blob、PDF、郵件
+  OpenApi/                     符合 CSP 的 Swagger UI 頁面
+  wwwroot/app/                 React 產出（不納入 Git）
+src/HomeVault.Client/          React + TypeScript + Vite
+tests/HomeVault.Tests/         xUnit 測試
+infra/                        Azure Bicep、本機 HTTPS proxy
+scripts/                      部署／初始化腳本
+docs/azure-deployment.md       Azure 部署操作說明
+.github/workflows/             CI 與部署 pipeline
+Dockerfile / compose.yaml     容器建置與本機整合環境
+```
 
 ## License
 
-Released under the [MIT License](LICENSE).
+[MIT](LICENSE)

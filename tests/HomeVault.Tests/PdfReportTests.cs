@@ -65,6 +65,17 @@ namespace HomeVault.Tests
         }
 
         [Fact]
+        public void Generate_WithTotalAboveIntMaxValue_ProducesValidPdf()
+        {
+            var items = new[]
+            {
+                new CatalogItem { ItemId = "max01", CatalogId = "cat01", ItemName = "Collection A", ItemType = "Art", ItemValue = int.MaxValue },
+                new CatalogItem { ItemId = "max02", CatalogId = "cat01", ItemName = "Collection B", ItemType = "Art", ItemValue = int.MaxValue }
+            };
+            AssertIsPdf(new QuestPdfInsuranceReportGenerator().Generate(BuildResident(), items));
+        }
+
+        [Fact]
         public void Generate_WithEmptyCatalog_StillProducesValidPdf()
         {
             QuestPdfInsuranceReportGenerator gen = new();

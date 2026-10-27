@@ -20,7 +20,7 @@ namespace HomeVault.Services
     {
         public byte[] Generate(Resident resident, IReadOnlyList<CatalogItem> items)
         {
-            int total = items.Sum(i => i.ItemValue);
+            long total = items.Sum(i => (long)i.ItemValue);
             string generatedOn = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm 'UTC'");
 
             return Document.Create(container =>
@@ -30,7 +30,8 @@ namespace HomeVault.Services
                     page.Size(PageSizes.A4);
                     page.Margin(2, Unit.Centimetre);
                     page.PageColor(Colors.White);
-                    page.DefaultTextStyle(x => x.FontSize(11));
+                    page.DefaultTextStyle(x => x.FontSize(11)
+                        .FontFamily("Lato", "Noto Sans CJK TC", "Microsoft JhengHei", "PingFang TC"));
 
                     page.Header().Column(col =>
                     {

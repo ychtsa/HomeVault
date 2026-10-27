@@ -33,7 +33,12 @@ namespace HomeVault.Middleware
          */
         public async Task InvokeAsync(HttpContext context)
         {
-            IHeaderDictionary headers = context.Response.Headers;
+            ApplyHeaders(context.Response.Headers);
+            await _next(context);
+        }
+
+        public static void ApplyHeaders(IHeaderDictionary headers)
+        {
 
             // Block MIME-type sniffing by browsers.
             headers["X-Content-Type-Options"] = "nosniff";
@@ -61,7 +66,6 @@ namespace HomeVault.Middleware
                 "base-uri 'self'; " +
                 "form-action 'self'";
 
-            await _next(context);
         }
     }
 }
